@@ -1,5 +1,5 @@
 ﻿feedparser
-yfinance
-python-dotenv
 requests
+trafilatura
+beautifulsoup4
 streamlit

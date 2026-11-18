@@ -1,30 +1,69 @@
-﻿import sys
-import os
+"""Run unified news and reference-material collection."""
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from collections import Counter
+from pathlib import Path
 
-from modules.collector import MarketDataCollector
-from modules.summarizer import NewsSummarizer
-from modules.doc_writer import BriefingDocWriter
+from core.collector_manager import CollectorManager
+from storage.retention_manager import merge_and_prune
 
-def run_morning_briefing():
-    print("1. 글로벌 증시 및 경제 뉴스 수집 중...")
-    collector = MarketDataCollector()
-    indices = collector.fetch_global_indices()
-    raw_news = collector.fetch_economic_news()
 
-    print("2. 뉴스 키워드 분석 및 섹터 매핑 중...")
-    summarizer = NewsSummarizer()
-    mapped_news = summarizer.summarize_and_map_news(raw_news)
+OUTPUT_PATH = Path("data/news_latest.json")
+MIN_BODY_LENGTH = 80
 
-    print("3. 아침 브리핑 리포트 문서 생성 중...")
-    writer = BriefingDocWriter()
-    report_content = writer.format_briefing(indices, mapped_news)
-    saved_path = writer.save_to_file(report_content)
 
-    print(f"\n✅ 브리핑 생성 완료! 저장 위치: {saved_path}")
-    print("-" * 50)
-    print(report_content)
+def main():
+    manager = CollectorManager()
+
+    collected = manager.collect_all(include_legacy_rss=True)
+
+    valid_items = []
+    excluded_count = 0
+
+    for item in collected:
+        if not item.get("source_type"):
+            item["source_type"] = "news"
+
+        body = str(item.get("body") or "").strip()
+        status = str(item.get("extraction_status") or "")
+
+        if status.startswith("article_body") and len(body) >= MIN_BODY_LENGTH:
+            item["body_length"] = len(body)
+            valid_items.append(item)
+        else:
+            excluded_count += 1
+
+    result = merge_and_prune(valid_items, OUTPUT_PATH)
+
+    source_counts = Counter(
+        item.get("source", "unknown")
+        for item in valid_items
+    )
+
+    type_counts = Counter(
+        item.get("source_type", "unknown")
+        for item in valid_items
+    )
+
+    print("Unified collection completed")
+    print("Newly collected:", len(collected))
+    print("New items with original body:", len(valid_items))
+    print("Excluded without sufficient original body:", excluded_count)
+
+    print("\nRetention and storage results")
+    print("Previous items:", result["previous_count"])
+    print("Incoming items:", result["incoming_count"])
+    print("Saved active items:", result["saved_count"])
+    print("Expired items removed:", result["expired_count"])
+    print("Invalid or missing dates removed:", result["invalid_date_count"])
+    print("Duplicates removed:", result["duplicate_count"])
+
+    print("\nNew collection by source:")
+    for source, count in sorted(source_counts.items()):
+        print(f"  {source}: {count}")
+
+    print("New collection by type:", dict(type_counts))
+    print("Saved file:", result["saved_path"])
+
 
 if __name__ == "__main__":
-    run_morning_briefing()
+    main()
